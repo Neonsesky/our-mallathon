@@ -631,63 +631,103 @@ function Polaroid({ src, caption, onPick, onCaption, rot = -3, label, busy, capt
   );
 }
 
-// two polaroids stacked — tap "swap" to shuffle them like real prints
+// two polaroids stacked — spring-driven 3D shuffle (no CSS keyframes: buttery + interruptible)
 function PolaroidStack({ imgs, day, onPick, caption, onCaption, busyKey }) {
   const [front, setFront] = useState(0); // 0 = memory, 1 = patch shot
-  const [anim, setAnim] = useState(false);
-  const [leaving, setLeaving] = useState(null);
-  const [phase2, setPhase2] = useState(false);
-  const timers = useRef([]);
-  useEffect(() => () => timers.current.forEach(clearTimeout), []);
+  const frontRef = useRef(0);
+  const aRef = useRef(null);
+  const bRef = useRef(null);
+  const stopRef = useRef(null);
+  const animatingRef = useRef(false);
+
+  // resting poses
+  const REST_BACK = { x: 12, y: 10, z: -60, s: 0.985 };
+
+  const paint = useCallback((p) => {
+    // p: 0 → 1 progress of the shuffle
+    const arc = Math.sin(Math.PI * p);          // out-and-back
+    const leaving = frontRef.current;
+    const els = [aRef.current, bRef.current];
+    els.forEach((el, i) => {
+      if (!el) return;
+      const isLeaving = i === leaving;
+      let x, y, z, rotY, s;
+      if (isLeaving) {
+        x = arc * 74 + p * REST_BACK.x;
+        y = -arc * 5 + p * REST_BACK.y;
+        z = arc * 165 + p * REST_BACK.z;
+        rotY = -arc * 25;
+        s = 1 + p * (REST_BACK.s - 1);
+      } else {
+        x = -arc * 58 + (1 - p) * REST_BACK.x;
+        y = arc * 4 + (1 - p) * REST_BACK.y;
+        z = arc * 70 + (1 - p) * REST_BACK.z;
+        rotY = arc * 17;
+        s = REST_BACK.s + p * (1 - REST_BACK.s);
+      }
+      el.style.transform =
+        `translate3d(${x}px, ${y}px, ${z}px) rotateY(${rotY}deg) scale(${s})`;
+      // depth crossover at the midpoint
+      el.style.zIndex = isLeaving ? (p < 0.5 ? 3 : 1) : 2;
+    });
+  }, []);
+
+  // settle both cards into their resting poses
+  const rest = useCallback(() => {
+    const els = [aRef.current, bRef.current];
+    els.forEach((el, i) => {
+      if (!el) return;
+      const isFront = i === frontRef.current;
+      el.style.transform = isFront
+        ? "translate3d(0,0,0) rotateY(0deg) scale(1)"
+        : `translate3d(${REST_BACK.x}px, ${REST_BACK.y}px, ${REST_BACK.z}px) rotateY(0deg) scale(${REST_BACK.s})`;
+      el.style.zIndex = isFront ? 2 : 1;
+    });
+  }, []);
+
+  useEffect(() => { frontRef.current = front; rest(); }, [front, rest]);
+  useEffect(() => () => { if (stopRef.current) stopRef.current(); }, []);
+
   const swap = () => {
-    if (anim) return;
-    setLeaving(front);
-    setAnim(true);
-    setPhase2(false);
-    timers.current.push(setTimeout(() => setPhase2(true), 290));
-    timers.current.push(
-      setTimeout(() => {
-        setFront((f) => 1 - f);
-        setAnim(false);
-        setLeaving(null);
-      }, 660)
-    );
+    if (animatingRef.current) return;
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduced) { setFront((f) => 1 - f); return; }
+    animatingRef.current = true;
+    stopRef.current = springTo({
+      from: 0,
+      to: 100,
+      damping: 1,
+      response: 0.52,
+      onUpdate: (v) => paint(Math.min(Math.max(v / 100, 0), 1)),
+      onDone: () => {
+        animatingRef.current = false;
+        setFront((f) => 1 - f); // rest() runs via effect — poses already match
+      },
+    });
   };
+
   const cards = [
-    { key: "memory", src: imgs?.memory, label: "us, day " + day, cap: caption, capEdit: true, rot: -2.5 },
-    { key: "patch", src: imgs?.patch, label: "the patch!! ✌️", cap: null, capEdit: false, rot: 3.5 },
+    { key: "memory", src: imgs?.memory, label: "us, day " + day, cap: caption, capEdit: true, rot: -2.5, ref: aRef },
+    { key: "patch", src: imgs?.patch, label: "the patch!! ✌️", cap: null, capEdit: false, rot: 3.5, ref: bRef },
   ];
+
   return (
     <div className="stackWrap">
       <div className="stack">
-        {cards.map((c, i) => {
-          const isFront = front === i;
-          let cls = "stackCard " + (isFront ? "front" : "back");
-          let z;
-          if (anim) {
-            if (i === leaving) {
-              cls = "stackCard goingBack";
-              z = phase2 ? 1 : 3;
-            } else {
-              cls = "stackCard comingFront";
-              z = 2;
-            }
-          }
-          return (
-            <div key={c.key} className={cls} style={z ? { zIndex: z } : undefined}>
-              <Polaroid
-                src={c.src}
-                caption={c.cap}
-                captionEditable={c.capEdit}
-                label={c.label}
-                rot={c.rot}
-                busy={busyKey === c.key}
-                onPick={() => onPick(c.key)}
-                onCaption={c.capEdit ? onCaption : () => {}}
-              />
-            </div>
-          );
-        })}
+        {cards.map((c) => (
+          <div key={c.key} className="stackCard" ref={c.ref}>
+            <Polaroid
+              src={c.src}
+              caption={c.cap}
+              captionEditable={c.capEdit}
+              label={c.label}
+              rot={c.rot}
+              busy={busyKey === c.key}
+              onPick={() => onPick(c.key)}
+              onCaption={c.capEdit ? onCaption : () => {}}
+            />
+          </div>
+        ))}
       </div>
       <button className="swapBtn" onClick={swap}>⇄ swap polaroids</button>
     </div>
@@ -1427,36 +1467,56 @@ export default function App() {
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
     let dragged = false; // a real horizontal drag happened — swallow the tap that follows
+    let lockedVertical = false;
+
+    const settle = (velocity) => {
+      const W = wrap.clientWidth || 1;
+      if (reduced || !velocity) { goTo(Math.round(-xRef.current / W), 0); return; }
+      const projected = xRef.current + project(velocity);
+      let idx = Math.round(-projected / W);
+      // a decisive flick always advances at least one page
+      const cur = Math.round(-baseX / W);
+      if (Math.abs(velocity) > 300 && idx === cur) idx = cur + (velocity < 0 ? 1 : -1);
+      goTo(idx, velocity);
+    };
+
     const down = (e) => {
       if (e.pointerType === "mouse" && e.button !== 0) return;
       if (stopSpring.current) stopSpring.current(); // interruptible: grab mid-flight
       dragging = true;
       committed = false;
       dragged = false;
+      lockedVertical = false;
       startX = e.clientX;
       startY = e.clientY;
       baseX = xRef.current;
       hist = [{ t: performance.now(), x: e.clientX }];
-      try { wrap.setPointerCapture && wrap.setPointerCapture(e.pointerId); } catch {}
     };
+
     const move = (e) => {
-      if (!dragging) return;
+      if (!dragging || lockedVertical) return;
       const dx = e.clientX - startX, dy = e.clientY - startY;
       if (!committed) {
-        if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
-        if (Math.abs(dy) > Math.abs(dx)) { dragging = false; return; } // vertical scroll wins
+        const adx = Math.abs(dx), ady = Math.abs(dy);
+        if (adx < 6 && ady < 6) return;          // still deciding
+        if (ady > adx * 1.2) { lockedVertical = true; return; } // let the page scroll
         committed = true;
         dragged = true;
+        startX = e.clientX;                       // re-anchor: no jump on commit
+        startY = e.clientY;
+        try { wrap.setPointerCapture && wrap.setPointerCapture(e.pointerId); } catch {}
       }
       const W = wrap.clientWidth;
-      let x = baseX + dx;
+      let x = baseX + (e.clientX - startX);
       const min = -(N_PAGES - 1) * W, max = 0;
       if (x > max) x = max + rubberband(x - max, W);
       if (x < min) x = min + rubberband(x - min, W);
       applyX(x);
+      if (e.cancelable) e.preventDefault();       // we own this gesture now
       hist.push({ t: performance.now(), x: e.clientX });
       if (hist.length > 6) hist.shift();
     };
+
     const clickCapture = (e) => {
       if (dragged) {
         e.preventDefault();
@@ -1464,27 +1524,29 @@ export default function App() {
         dragged = false;
       }
     };
-    const up = () => {
+
+    const endDrag = () => {
       if (!dragging) return;
       dragging = false;
       if (!committed) return;
-      const W = wrap.clientWidth;
       let v = 0;
       if (hist.length > 1) {
         const a = hist[0], b = hist[hist.length - 1];
         if (b.t > a.t) v = ((b.x - a.x) / (b.t - a.t)) * 1000;
       }
-      if (reduced) { goTo(Math.round(-xRef.current / W), 0); return; }
-      const projected = xRef.current + project(v);
-      goTo(Math.round(-projected / W), v);
+      settle(v);
     };
-    const cancel = () => { if (dragging) { dragging = false; goTo(Math.round(-xRef.current / (wrap.clientWidth || 1)), 0); } };
+
+    const up = endDrag;
+    // browser stole the gesture mid-drag — settle where we are instead of freezing
+    const cancel = () => { if (dragging && committed) { endDrag(); } else { dragging = false; } };
     const resize = () => { applyX(-Math.round(-xRef.current / (wrap.clientWidth || 1)) * wrap.clientWidth); };
 
     wrap.addEventListener("pointerdown", down);
-    wrap.addEventListener("pointermove", move);
+    wrap.addEventListener("pointermove", move, { passive: false });
     wrap.addEventListener("pointerup", up);
     wrap.addEventListener("pointercancel", cancel);
+    wrap.addEventListener("lostpointercapture", cancel);
     wrap.addEventListener("click", clickCapture, true);
     window.addEventListener("resize", resize);
     return () => {
@@ -1492,6 +1554,7 @@ export default function App() {
       wrap.removeEventListener("pointermove", move);
       wrap.removeEventListener("pointerup", up);
       wrap.removeEventListener("pointercancel", cancel);
+      wrap.removeEventListener("lostpointercapture", cancel);
       wrap.removeEventListener("click", clickCapture, true);
       window.removeEventListener("resize", resize);
     };
@@ -1664,9 +1727,11 @@ body { overscroll-behavior: none; }
 .track { display: flex; height: 100%; will-change: transform; }
 .page {
   flex: 0 0 100%; height: 100%; position: relative; overflow: hidden;
+  touch-action: pan-y;
 }
 .scroll {
   height: 100%; overflow-y: auto; overscroll-behavior: contain;
+  touch-action: pan-y;
   padding: calc(64px + env(safe-area-inset-top)) 18px calc(126px + env(safe-area-inset-bottom));
   max-width: 480px; margin: 0 auto;
 }
@@ -1741,25 +1806,17 @@ body { overscroll-behavior: none; }
 
 /* ---- polaroid stack ---- */
 .stackWrap { position: relative; z-index: 1; margin: 10px 0 6px; }
-.stack { position: relative; height: min(112vw, 470px); perspective: 1100px; transform-style: preserve-3d; }
-.stackCard { position: absolute; inset: 0; display: flex; justify-content: center; will-change: transform; }
-.stackCard.front { z-index: 2; transform: translate3d(0,0,0); }
-.stackCard.back { z-index: 1; transform: translate3d(12px, 10px, -60px) scale(.985); filter: brightness(.93); }
-.stackCard.goingBack { animation: goBack3d .66s cubic-bezier(.32,.9,.35,1) both; }
-.stackCard.comingFront { animation: comeFront3d .66s cubic-bezier(.32,.9,.35,1) both; }
-@keyframes goBack3d {
-  0%   { transform: translate3d(0,0,0) rotateY(0) rotateZ(0); filter: brightness(1); }
-  20%  { transform: translate3d(28%, -6%, 90px) rotateY(-12deg) rotateZ(4deg); filter: brightness(1.03); }
-  48%  { transform: translate3d(76%, -3%, 150px) rotateY(-26deg) rotateZ(8deg); filter: brightness(1.04); }
-  78%  { transform: translate3d(26%, 6%, 10px) rotateY(-10deg) rotateZ(3deg) scale(.99); filter: brightness(.96); }
-  100% { transform: translate3d(12px, 10px, -60px) rotateY(0) rotateZ(0) scale(.985); filter: brightness(.93); }
+.stack {
+  position: relative; height: min(112vw, 470px);
+  perspective: 1200px; perspective-origin: 50% 45%;
+  transform-style: preserve-3d;
 }
-@keyframes comeFront3d {
-  0%   { transform: translate3d(12px, 10px, -60px) rotateY(0) rotateZ(0) scale(.985); filter: brightness(.93); }
-  22%  { transform: translate3d(-22%, 5%, -20px) rotateY(10deg) rotateZ(-3deg) scale(.99); filter: brightness(.96); }
-  50%  { transform: translate3d(-54%, 2%, 50px) rotateY(18deg) rotateZ(-6deg); filter: brightness(1.02); }
-  100% { transform: translate3d(0,0,0) rotateY(0) rotateZ(0) scale(1); filter: brightness(1); }
+.stackCard {
+  position: absolute; inset: 0; display: flex; justify-content: center;
+  will-change: transform; backface-visibility: hidden;
+  transform: translate3d(0,0,0);
 }
+.stackCard .polaroid { will-change: transform; }
 
 .polaroid {
   margin: 0; width: min(78vw, 330px); position: relative;
@@ -2113,7 +2170,7 @@ body { overscroll-behavior: none; }
 
 @media (prefers-reduced-motion: reduce) {
   .stopmo, .grain, .heart, .arrowAnim, .lockBadge, .envelope.ready .waxSeal, .envelope.shake, .heartBtn.on { animation: none !important; }
-  .stackCard.goingBack, .stackCard.comingFront, .noteCard, .sticker.stuck { animation-duration: .01s; }
+  .noteCard, .sticker.stuck { animation-duration: .01s; }
   .confetti i { animation-duration: .01s; opacity: 0; }
 }
 `;
