@@ -24,16 +24,14 @@ const PAGE_COLORS = [
 ];
 
 const DEFAULT_DAYS = [
-  "Dubai Mall",
-  "Mall of the Emirates",
-  "Dubai Hills Mall",
-  "Dubai Festival City",
-  "City Centre Mirdif",
-  "City Centre Deira",
-].map((mall, i) => ({
-  mall,
-  date: "",
-  time: "",
+  { mall: "City Centre Deira", date: "Mon 17 Aug", time: "6:00 am" },
+  { mall: "City Centre Mirdif", date: "Tue 18 Aug", time: "6:00 am" },
+  { mall: "Dubai Festival City", date: "Wed 19 Aug", time: "6:00 am" },
+  { mall: "Mall of the Emirates", date: "Mon 24 Aug", time: "6:00 am" },
+  { mall: "Dubai Mall", date: "Tue 25 Aug", time: "6:00 am" },
+  { mall: "Dubai Hills Mall", date: "Wed 26 Aug", time: "6:00 am" },
+].map((d) => ({
+  ...d,
   stepsN: "",
   stepsF: "",
   caption: "",
@@ -47,6 +45,8 @@ const MOODS = ["😍", "🔥", "🥵", "💪", "🥹", "🤪", "😮‍💨", "�
 
 const DEFAULT_NOTE =
   "shady — six malls, six early alarms, and a ridiculous number of steps… and i'd do it all again tomorrow as long as you're walking next to me. you turn even mall laps into my favourite adventure. this little book is ours now. i love you.";
+
+const OLD_MALL_ORDER = ["Dubai Mall", "Mall of the Emirates", "Dubai Hills Mall", "Dubai Festival City", "City Centre Mirdif", "City Centre Deira"];
 
 /* ---------- tiny utilities ---------- */
 
@@ -164,7 +164,7 @@ function drawStar(ctx, cx, cy, r) {
   ctx.fill();
 }
 
-async function buildStory({ photoSrc, stickerSrc, minis, c1, c2, kicker, big, sub, dateLine, caption, steps, stepsLabel, footer }) {
+async function buildStory({ photoSrc, stickerSrc, stickerStyle, minis, c1, c2, kicker, big, sub, dateLine, caption, steps, stepsLabel, footer }) {
   try {
     await Promise.all([
       document.fonts.load('100px Anton'),
@@ -279,9 +279,24 @@ async function buildStory({ photoSrc, stickerSrc, minis, c1, c2, kicker, big, su
   ctx.restore();
   ctx.restore();
 
-  // patch: a second, smaller polaroid of the real uploaded photo (day)
-  // or mini badge row of real photos (finale)
-  if (stickerImg) {
+  // patch: scanned patches are circular badges — draw them die-cut.
+  // a regular photo falls back to a second mini polaroid. finale = badge row.
+  if (stickerImg && stickerStyle === "circle") {
+    ctx.save();
+    ctx.translate(775, 1345);
+    ctx.rotate(0.08);
+    ctx.shadowColor = "rgba(0,0,0,.4)";
+    ctx.shadowBlur = 36;
+    ctx.shadowOffsetY = 18;
+    ctx.fillStyle = "#FFFFFF";
+    ctx.beginPath(); ctx.arc(0, 0, 158, 0, Math.PI * 2); ctx.fill();
+    ctx.shadowColor = "transparent";
+    ctx.beginPath(); ctx.arc(0, 0, 144, 0, Math.PI * 2);
+    ctx.save(); ctx.clip();
+    coverInto(ctx, stickerImg, -144, -144, 288, 288);
+    ctx.restore();
+    ctx.restore();
+  } else if (stickerImg) {
     ctx.save();
     ctx.translate(760, 1360);
     ctx.rotate(0.09);
@@ -620,49 +635,52 @@ function Polaroid({ src, caption, onPick, onCaption, rot = -3, label, busy, capt
 function PolaroidStack({ imgs, day, onPick, caption, onCaption, busyKey }) {
   const [front, setFront] = useState(0); // 0 = memory, 1 = patch shot
   const [anim, setAnim] = useState(false);
+  const [leaving, setLeaving] = useState(null);
+  const [phase2, setPhase2] = useState(false);
+  const timers = useRef([]);
+  useEffect(() => () => timers.current.forEach(clearTimeout), []);
   const swap = () => {
     if (anim) return;
+    setLeaving(front);
     setAnim(true);
-    setTimeout(() => setFront((f) => 1 - f), 230);
-    setTimeout(() => setAnim(false), 480);
+    setPhase2(false);
+    timers.current.push(setTimeout(() => setPhase2(true), 290));
+    timers.current.push(
+      setTimeout(() => {
+        setFront((f) => 1 - f);
+        setAnim(false);
+        setLeaving(null);
+      }, 660)
+    );
   };
   const cards = [
-    {
-      key: "memory",
-      src: imgs?.memory,
-      label: "us, day " + day,
-      cap: caption,
-      capEdit: true,
-    },
-    {
-      key: "patch",
-      src: imgs?.patch,
-      label: "the patch!! ✌️",
-      cap: null,
-      capEdit: false,
-    },
+    { key: "memory", src: imgs?.memory, label: "us, day " + day, cap: caption, capEdit: true, rot: -2.5 },
+    { key: "patch", src: imgs?.patch, label: "the patch!! ✌️", cap: null, capEdit: false, rot: 3.5 },
   ];
   return (
     <div className="stackWrap">
-      <div className={"stack" + (anim ? " swapping" : "")}>
+      <div className="stack">
         {cards.map((c, i) => {
           const isFront = front === i;
+          let cls = "stackCard " + (isFront ? "front" : "back");
+          let z;
+          if (anim) {
+            if (i === leaving) {
+              cls = "stackCard goingBack";
+              z = phase2 ? 1 : 3;
+            } else {
+              cls = "stackCard comingFront";
+              z = 2;
+            }
+          }
           return (
-            <div
-              key={c.key}
-              className={
-                "stackCard " +
-                (isFront ? "front" : "back") +
-                (anim && isFront ? " goingBack" : "") +
-                (anim && !isFront ? " comingFront" : "")
-              }
-            >
+            <div key={c.key} className={cls} style={z ? { zIndex: z } : undefined}>
               <Polaroid
                 src={c.src}
                 caption={c.cap}
                 captionEditable={c.capEdit}
                 label={c.label}
-                rot={isFront ? -2.5 : 4}
+                rot={c.rot}
                 busy={busyKey === c.key}
                 onPick={() => onPick(c.key)}
                 onCaption={c.capEdit ? onCaption : () => {}}
@@ -688,6 +706,73 @@ function PatchSticker({ src, onPick, busy, theme, done }) {
       )}
       {done && <span className="stickerCheck" aria-hidden="true">✓</span>}
     </button>
+  );
+}
+
+/* ---------- patch camera (circle guide to line up the patch) ---------- */
+
+function PatchCam({ onCapture, onClose }) {
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
+  const [err, setErr] = useState("");
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const s = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "environment", width: { ideal: 1440 }, height: { ideal: 1440 } },
+          audio: false,
+        });
+        if (!alive) { s.getTracks().forEach((t) => t.stop()); return; }
+        streamRef.current = s;
+        if (videoRef.current) {
+          videoRef.current.srcObject = s;
+          videoRef.current.onloadedmetadata = () => setReady(true);
+          videoRef.current.play().catch(() => {});
+        }
+      } catch {
+        setErr("camera blocked — allow camera access in your browser, or use the normal upload instead");
+      }
+    })();
+    return () => {
+      alive = false;
+      if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop());
+    };
+  }, []);
+  const snap = () => {
+    const v = videoRef.current;
+    if (!v || !v.videoWidth) return;
+    // map the on-screen guide circle exactly onto the raw camera frame
+    const rect = v.getBoundingClientRect();
+    const scale = Math.max(rect.width / v.videoWidth, rect.height / v.videoHeight);
+    const dEl = Math.min(0.74 * rect.width, 340); // guide circle diameter on screen
+    const dSrc = dEl / scale; // same circle in video pixels
+    const cx = v.videoWidth / 2;
+    const cy = v.videoHeight / 2 - (0.08 * dEl) / scale; // guide sits slightly above centre
+    const c = document.createElement("canvas");
+    c.width = 640; c.height = 640;
+    const ctx = c.getContext("2d");
+    ctx.beginPath();
+    ctx.arc(320, 320, 320, 0, Math.PI * 2);
+    ctx.clip();
+    ctx.drawImage(v, cx - dSrc / 2, cy - dSrc / 2, dSrc, dSrc, 0, 0, 640, 640);
+    onCapture(c.toDataURL("image/png")); // png keeps the die-cut transparency
+  };
+  return (
+    <div className="cam">
+      <video ref={videoRef} playsInline muted />
+      {err ? (
+        <div className="camErr marker">{err}</div>
+      ) : (
+        <>
+          <div className="camHole" aria-hidden="true" />
+          <div className="camHint marker">line up the patch inside the circle</div>
+          <button className="camShutter" onClick={snap} disabled={!ready} aria-label="Take photo" />
+        </>
+      )}
+      <button className="camClose" onClick={onClose} aria-label="Close camera">✕</button>
+    </div>
   );
 }
 
@@ -757,6 +842,7 @@ function CoverPage({ totals, doneCount, meta = {}, onMeta = () => {}, onExport =
   return (
     <div className="page coverPage">
       <Doodles />
+      <div className="scroll coverScroll">
       <div className="coverInner">
         <div className="eyebrow marker">the official scrapbook of</div>
         <h1 className="mega">
@@ -797,6 +883,7 @@ function CoverPage({ totals, doneCount, meta = {}, onMeta = () => {}, onExport =
           {showRestore && <button className="tinyBtn" onClick={onImport}>⤒ restore</button>}
         </div>
         <div className="saveNote">{status}</div>
+      </div>
       </div>
     </div>
   );
@@ -876,15 +963,20 @@ function DayPage({ i, day, imgs, theme, onDay, onPick, busyKey, onShare }) {
           />
           <div className="patchText">
             <div className="patchTitle marker">today’s patch</div>
-            <p className="patchNote">upload a close-up of the patch and it becomes a sticker.</p>
-            <button
-              className={"doneBtn" + (day.patchDone ? " isDone" : "")}
-              onClick={() => onDay({ patchDone: !day.patchDone })}
-            >
-              {day.patchDone ? "✓ patch secured" : "mark patch collected"}
-            </button>
+            <p className="patchNote">scan the patch with the circle guide — it becomes a perfect badge.</p>
+            <div className="patchBtns">
+              <button className="doneBtn" onClick={onScan}>📷 scan patch</button>
+              <button
+                className={"doneBtn" + (day.patchDone ? " isDone" : "")}
+                onClick={() => onDay({ patchDone: !day.patchDone })}
+              >
+                {day.patchDone ? "✓ secured" : "mark collected"}
+              </button>
+            </div>
           </div>
         </section>
+
+        <button className="storyBtn" onClick={onShare}>📤 save for instagram story</button>
 
         <section className="moodRow">
           <div className="moodTitle marker">how we felt</div>
@@ -910,7 +1002,6 @@ function DayPage({ i, day, imgs, theme, onDay, onPick, busyKey, onShare }) {
             ))}
           </div>
         </section>
-        <button className="storyBtn" onClick={onShare}>📤 save for instagram story</button>
         <div className="pageFoot marker">keep going, {["habibi", "champ", "superstar", "legend", "cutie", "winner"][i]} →</div>
       </div>
     </div>
@@ -1041,7 +1132,17 @@ export default function App() {
     const changed = data && str !== lastData.current;
     if (changed) {
       lastData.current = str;
-      if (data.days) setDays((cur) => cur.map((d, i) => ({ ...d, ...(data.days[i] || {}) })));
+      if (data.days)
+        setDays((cur) =>
+          cur.map((d, i) => {
+            const s = data.days[i] || {};
+            const merged = { ...d, ...s };
+            if (!s.mall || s.mall === OLD_MALL_ORDER[i]) merged.mall = d.mall;
+            if (!s.date) merged.date = d.date;
+            if (!s.time) merged.time = d.time;
+            return merged;
+          })
+        );
       if (data.meta) setMeta((m) => ({ ...m, ...data.meta }));
     }
     setLoaded(true);
@@ -1200,7 +1301,8 @@ export default function App() {
         const total = fmt(d.stepsN) + fmt(d.stepsF);
         blob = await buildStory({
           photoSrc: b.memory,
-          stickerSrc: b.patch || b.sticker,
+          stickerSrc: b.sticker || b.patch,
+          stickerStyle: b.sticker ? "circle" : "polaroid",
           c1: DAY_THEMES[i].c1, c2: DAY_THEMES[i].c2,
           kicker: "OUR MALLATHON ’26",
           big: "DAY " + String(i + 1).padStart(2, "0"),
@@ -1309,16 +1411,18 @@ export default function App() {
     let hist = [];
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
+    let dragged = false; // a real horizontal drag happened — swallow the tap that follows
     const down = (e) => {
-      if (e.target.closest("input, button, textarea, a")) return;
+      if (e.pointerType === "mouse" && e.button !== 0) return;
       if (stopSpring.current) stopSpring.current(); // interruptible: grab mid-flight
       dragging = true;
       committed = false;
+      dragged = false;
       startX = e.clientX;
       startY = e.clientY;
       baseX = xRef.current;
       hist = [{ t: performance.now(), x: e.clientX }];
-      wrap.setPointerCapture && wrap.setPointerCapture(e.pointerId);
+      try { wrap.setPointerCapture && wrap.setPointerCapture(e.pointerId); } catch {}
     };
     const move = (e) => {
       if (!dragging) return;
@@ -1327,6 +1431,7 @@ export default function App() {
         if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
         if (Math.abs(dy) > Math.abs(dx)) { dragging = false; return; } // vertical scroll wins
         committed = true;
+        dragged = true;
       }
       const W = wrap.clientWidth;
       let x = baseX + dx;
@@ -1336,6 +1441,13 @@ export default function App() {
       applyX(x);
       hist.push({ t: performance.now(), x: e.clientX });
       if (hist.length > 6) hist.shift();
+    };
+    const clickCapture = (e) => {
+      if (dragged) {
+        e.preventDefault();
+        e.stopPropagation();
+        dragged = false;
+      }
     };
     const up = () => {
       if (!dragging) return;
@@ -1358,12 +1470,14 @@ export default function App() {
     wrap.addEventListener("pointermove", move);
     wrap.addEventListener("pointerup", up);
     wrap.addEventListener("pointercancel", cancel);
+    wrap.addEventListener("click", clickCapture, true);
     window.addEventListener("resize", resize);
     return () => {
       wrap.removeEventListener("pointerdown", down);
       wrap.removeEventListener("pointermove", move);
       wrap.removeEventListener("pointerup", up);
       wrap.removeEventListener("pointercancel", cancel);
+      wrap.removeEventListener("click", clickCapture, true);
       window.removeEventListener("resize", resize);
     };
   }, [applyX, goTo]);
@@ -1533,7 +1647,7 @@ body { overscroll-behavior: none; }
 }
 .scroll {
   height: 100%; overflow-y: auto; overscroll-behavior: contain;
-  padding: calc(64px + env(safe-area-inset-top)) 18px calc(86px + env(safe-area-inset-bottom));
+  padding: calc(64px + env(safe-area-inset-top)) 18px calc(126px + env(safe-area-inset-bottom));
   max-width: 480px; margin: 0 auto;
 }
 
@@ -1549,7 +1663,9 @@ body { overscroll-behavior: none; }
 @keyframes jit2 { 0%{transform:rotate(5deg) translate(0,0)} 100%{transform:rotate(-4deg) translate(-3px,2px)} }
 
 /* ---- cover ---- */
-.coverPage { display: flex; align-items: center; justify-content: center; }
+.coverPage { display: block; }
+.coverScroll { display: flex; }
+.coverScroll .coverInner { margin: auto; }
 .coverInner { text-align: center; padding: 24px; max-width: 440px; z-index: 1; }
 .eyebrow { color: rgba(255,255,255,.95); font-size: 18px; transform: rotate(-2deg); text-shadow: 2px 2px 0 rgba(0,0,0,.2); }
 .mega {
@@ -1605,21 +1721,24 @@ body { overscroll-behavior: none; }
 
 /* ---- polaroid stack ---- */
 .stackWrap { position: relative; z-index: 1; margin: 10px 0 6px; }
-.stack { position: relative; height: min(112vw, 470px); }
-.stackCard { position: absolute; inset: 0; display: flex; justify-content: center; }
-.stackCard.front { z-index: 2; }
-.stackCard.back { z-index: 1; transform: translate(10px, 10px) scale(.97); filter: brightness(.94); }
-.stackCard.goingBack { animation: goBack .48s cubic-bezier(.3,1.2,.4,1) forwards; }
-.stackCard.comingFront { animation: comeFront .48s cubic-bezier(.3,1.2,.4,1) forwards; }
-@keyframes goBack {
-  0% { transform: translate(0,0) scale(1); }
-  50% { transform: translate(66%, -4%) rotate(9deg) scale(.98); }
-  100% { transform: translate(10px,10px) scale(.97); }
+.stack { position: relative; height: min(112vw, 470px); perspective: 1100px; transform-style: preserve-3d; }
+.stackCard { position: absolute; inset: 0; display: flex; justify-content: center; will-change: transform; }
+.stackCard.front { z-index: 2; transform: translate3d(0,0,0); }
+.stackCard.back { z-index: 1; transform: translate3d(12px, 10px, -60px) scale(.985); filter: brightness(.93); }
+.stackCard.goingBack { animation: goBack3d .66s cubic-bezier(.32,.9,.35,1) both; }
+.stackCard.comingFront { animation: comeFront3d .66s cubic-bezier(.32,.9,.35,1) both; }
+@keyframes goBack3d {
+  0%   { transform: translate3d(0,0,0) rotateY(0) rotateZ(0); filter: brightness(1); }
+  20%  { transform: translate3d(28%, -6%, 90px) rotateY(-12deg) rotateZ(4deg); filter: brightness(1.03); }
+  48%  { transform: translate3d(76%, -3%, 150px) rotateY(-26deg) rotateZ(8deg); filter: brightness(1.04); }
+  78%  { transform: translate3d(26%, 6%, 10px) rotateY(-10deg) rotateZ(3deg) scale(.99); filter: brightness(.96); }
+  100% { transform: translate3d(12px, 10px, -60px) rotateY(0) rotateZ(0) scale(.985); filter: brightness(.93); }
 }
-@keyframes comeFront {
-  0% { transform: translate(10px,10px) scale(.97); }
-  50% { transform: translate(-56%, 3%) rotate(-7deg) scale(.99); }
-  100% { transform: translate(0,0) scale(1); }
+@keyframes comeFront3d {
+  0%   { transform: translate3d(12px, 10px, -60px) rotateY(0) rotateZ(0) scale(.985); filter: brightness(.93); }
+  22%  { transform: translate3d(-22%, 5%, -20px) rotateY(10deg) rotateZ(-3deg) scale(.99); filter: brightness(.96); }
+  50%  { transform: translate3d(-54%, 2%, 50px) rotateY(18deg) rotateZ(-6deg); filter: brightness(1.02); }
+  100% { transform: translate3d(0,0,0) rotateY(0) rotateZ(0) scale(1); filter: brightness(1); }
 }
 
 .polaroid {
