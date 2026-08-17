@@ -889,7 +889,7 @@ function CoverPage({ totals, doneCount, meta = {}, onMeta = () => {}, onExport =
   );
 }
 
-function DayPage({ i, day, imgs, theme, onDay, onPick, busyKey, onShare }) {
+function DayPage({ i, day, imgs, theme, onDay, onPick, busyKey, onShare, onScan }) {
   const n = fmt(day.stepsN), f = fmt(day.stepsF);
   const total = n + f;
   const winner = n > f ? "N" : f > n ? "F" : null;
@@ -1098,6 +1098,7 @@ export default function App() {
   const [toast, setToast] = useState("");
   const [ghConf, setGhConf] = useState(undefined); // undefined=checking, null=needs setup, {}=configured
   const [showSetup, setShowSetup] = useState(false);
+  const [camDay, setCamDay] = useState(null);
 
   const wrapRef = useRef(null);
   const trackRef = useRef(null);
@@ -1336,6 +1337,20 @@ export default function App() {
     }
   };
 
+  /* ----- patch camera ----- */
+  const onCamCapture = (dataUrl) => {
+    const i = camDay;
+    setCamDay(null);
+    if (i == null) return;
+    const bundleKey = "d" + (i + 1);
+    setImgs((cur) => {
+      const bundle = { ...(cur[bundleKey] || {}), sticker: dataUrl };
+      sSet("mallathon:img:" + bundleKey, bundle).then((ok) => flash(ok ? "patch captured ✓" : "saved on this phone"));
+      return { ...cur, [bundleKey]: bundle };
+    });
+    patchDay(i, { patchDone: true });
+  };
+
   /* ----- photo picking ----- */
   const pickImage = (bundleKey, slot) => {
     if (isViewer) { flash("view-only — nirsh adds the photos 📸"); return; }
@@ -1536,6 +1551,10 @@ export default function App() {
             onDay={(p) => patchDay(i, p)}
             onPick={(slot) => pickImage("d" + (i + 1), slot)}
             onShare={() => shareStory(i)}
+            onScan={() => {
+              if (isViewer) { flash("view-only — nirsh scans the patches 📷"); return; }
+              setCamDay(i);
+            }}
           />
         ))}
         <FinalePage
@@ -1575,6 +1594,7 @@ export default function App() {
           onClose={ghConf ? () => setShowSetup(false) : null}
         />
       )}
+      {camDay != null && <PatchCam onCapture={onCamCapture} onClose={() => setCamDay(null)} />}
       <input type="file" accept="image/*" hidden ref={fileRef} onChange={onFile} />
       <input type="file" accept=".json,application/json" hidden ref={backupRef} onChange={onBackupFile} />
     </div>
